@@ -1,0 +1,11 @@
+# 复制为 config.yaml 后按本机修改。config.yaml 不要提交。
+# 管理页只听本机。订阅地址和节点密码不进这个文件。
+listen: 127.0.0.1:18765
+# 留空则使用 PATH 里的 mihomo，或本机 Clash Verge 自带的 verge-mihomo
+mihomo_bin: ""
+# 留空则读取 Clash Verge 当前正在用的那份配置，只取文件路径
+profile: ""
+data_dir: data
+# 侧车自己的混用端口和 DNS 端口，避开 Clash Verge 的 7890 / 7874
+mixed_port: 17890
+dns_listen: 127.0.0.1:17874

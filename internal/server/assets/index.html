@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>星口</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f4f1ea; color: #1d1a16; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 72px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: #5e584f; margin: 0 0 20px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .card, .panel { background: #fff; border-radius: 14px; padding: 14px 16px; }
+  .card b { display: block; font-size: 26px; font-weight: 650; }
+  .card span, .muted { color: #6d675e; }
+  .panel { margin-top: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input, select, button { font: inherit; border-radius: 10px; border: 1px solid #ddd6c8; padding: 8px 10px; background: #fff; }
+  button { cursor: pointer; background: #1d1a16; color: #fff; border-color: #1d1a16; }
+  button.ghost { background: #fff; color: #1d1a16; }
+  button:disabled { opacity: .45; cursor: default; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee8dc; vertical-align: top; }
+  th { color: #6d675e; font-weight: 600; font-size: 13px; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .ok { color: #1d7a45; }
+  .off { color: #8a4b12; }
+  .err { color: #9d1c1c; min-height: 1.2em; }
+  ul { margin: 8px 0 0; padding-left: 18px; }
+  @media (max-width: 720px) { .cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>星口</h1>
+  <p class="sub">从本机 Clash 里挑节点，每个节点一个本机端口。订阅和节点密码不离开这台电脑。</p>
+  <div class="cards">
+    <div class="card"><span>正在跑的后台程序</span><b id="programs">–</b></div>
+    <div class="card"><span>已打开的节点</span><b id="listening">–</b></div>
+    <div class="card"><span>已保存的出口</span><b id="saved">–</b></div>
+  </div>
+  <div class="panel">
+    <div class="row">
+      <button id="start" type="button">启动</button>
+      <button id="stop" class="ghost" type="button">停止</button>
+      <span id="state" class="muted"></span>
+    </div>
+    <p id="pending" class="muted"></p>
+    <p id="error" class="err"></p>
+    <table>
+      <thead><tr><th>节点</th><th>端口</th><th>给程序用的地址</th><th></th></tr></thead>
+      <tbody id="exits"></tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <div class="row">
+      <input id="q" placeholder="筛选节点" style="flex:1">
+      <input id="port" type="number" min="1024" max="65535" placeholder="端口，可空" style="width:140px">
+      <button id="add" type="button">添加</button>
+    </div>
+    <p class="muted" id="catalog-meta"></p>
+    <ul id="catalog"></ul>
+  </div>
+  <p class="muted">这里只关星口自己拉起的进程，不关 Clash Verge 正在用的那一个。改完要点一次启动才生效。</p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let catalog = [];
+let picked = "";
+
+async function api(path, opt) {
+  const res = await fetch(path, opt);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+function showError(err) { $("error").textContent = err ? err.message || String(err) : ""; }
+
+async function refresh() {
+  const s = await api("/api/status");
+  $("programs").textContent = s.program_count;
+  $("listening").textContent = s.listening_count;
+  $("saved").textContent = s.exit_count;
+  const mihomo = (s.programs || []).find((p) => p.name === "mihomo");
+  $("state").textContent = mihomo && mihomo.state === "running"
+    ? "出口进程在跑，pid " + mihomo.pid
+    : "出口进程没在跑";
+  $("pending").textContent = s.pending ? "列表改过了，再点一次启动才会换端口。" : "";
+  const rows = s.exits || [];
+  $("exits").innerHTML = rows.map((e) => `<tr>
+    <td>${escapeHtml(e.name)}</td>
+    <td><code>${e.port}</code></td>
+    <td><code>${escapeHtml(e.socks5h)}</code> <span class="${e.open ? "ok" : "off"}">${e.open ? "开着" : "没开"}</span></td>
+    <td><button class="ghost" data-port="${e.port}" type="button">删除</button></td>
+  </tr>`).join("") || `<tr><td colspan="4" class="muted">还没有出口。</td></tr>`;
+  $("start").disabled = rows.length === 0;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function drawCatalog() {
+  const q = $("q").value.trim();
+  const list = catalog.filter((n) => !q || n.name.includes(q)).slice(0, 40);
+  $("catalog").innerHTML = list.map((n) => `<li><button class="ghost" type="button" data-name="${escapeHtml(n.name)}">${escapeHtml(n.name)}</button></li>`).join("")
+    || `<li class="muted">没有匹配的节点。</li>`;
+}
+
+async function loadCatalog() {
+  try {
+    const c = await api("/api/catalog");
+    catalog = c.nodes || [];
+    $("catalog-meta").textContent = (c.profile || "当前配置") + " · 可用 " + c.usable + " 个，已藏起 " + c.hidden_notices + " 条订阅提示";
+    drawCatalog();
+  } catch (err) {
+    $("catalog-meta").textContent = err.message;
+  }
+}
+
+$("q").addEventListener("input", drawCatalog);
+$("catalog").addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-name]");
+  if (!btn) return;
+  picked = btn.getAttribute("data-name");
+  $("q").value = picked;
+  drawCatalog();
+});
+$("add").addEventListener("click", async () => {
+  showError();
+  const name = picked || $("q").value.trim();
+  const port = Number($("port").value || 0);
+  try {
+    await api("/api/exits", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, port }) });
+    $("port").value = "";
+    await refresh();
+  } catch (err) { showError(err); }
+});
+$("exits").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-port]");
+  if (!btn) return;
+  showError();
+  try {
+    await api("/api/exits/" + btn.dataset.port, { method: "DELETE" });
+    await refresh();
+  } catch (err) { showError(err); }
+});
+$("start").addEventListener("click", async () => {
+  showError();
+  $("start").disabled = true;
+  try { await api("/api/start", { method: "POST" }); await refresh(); }
+  catch (err) { showError(err); await refresh(); }
+});
+$("stop").addEventListener("click", async () => {
+  showError();
+  try { await api("/api/stop", { method: "POST" }); await refresh(); }
+  catch (err) { showError(err); }
+});
+
+refresh().catch(showError);
+loadCatalog();
+setInterval(() => refresh().catch(() => {}), 4000);
+</script>
+</body>
+</html>
