@@ -1,5 +1,10 @@
 # 星口 StarPort
 
+[简体中文](README.md) | [English](README.en.md)
+
+<img src="assets/brand/starport.svg" alt="StarPort" width="96" height="96">
+
+
 从本机 Clash 配置里挑少量节点，每个节点开一个只听 `127.0.0.1` 的 socks 端口，用一个页面增删、启动、停止。人和本机上的 AI 都调用这个页面，不把订阅地址和节点密码放进仓库。
 
 星口只管理自己拉起的那一份 mihomo。Clash Verge 正在用的系统代理和 TUN 不动。
